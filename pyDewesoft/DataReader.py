@@ -4,7 +4,7 @@ import _ctypes
 import platform
 from pint import UnitRegistry
 from pint.errors import UndefinedUnitError
-from numpy import array, zeros
+from numpy import array, zeros, append
 from os.path import dirname
 import re
 
@@ -34,6 +34,12 @@ class Reader:
         if self.filename is not None:
             self.read(filename=filename)
 
+    def sequence_read(self, filenames, fill_gaps):
+        for fname in filenames:
+            self.read(fname)
+        if fill_gaps:
+            self._fill_gaps()
+
     def read(self, filename=None):
         if filename is None:
             if self.filename is None:
@@ -43,9 +49,14 @@ class Reader:
         finfo = DWFileInfo(0, 0, 0)
         if self._lib.DWOpenDataFile(fname, addressof(finfo)) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not open file: ' + filename)
-        self.sample_rate = finfo.sample_rate
-        self.start_store_time = finfo.start_store_time
-        self.duration = finfo.duration
+        if self.sample_rate is None:
+            self.sample_rate = finfo.sample_rate
+        if self.start_store_time is None:
+            self.start_store_time = finfo.start_store_time
+        if self.duration is None:
+            self.duration = finfo.duration
+        else:
+            self.duration += finfo.duration
 
         # get number of channels
         num = self._lib.DWGetChannelListCount()
@@ -62,7 +73,21 @@ class Reader:
             attr = self._get_channel_name(ch_list, i)
             unit = self._get_unit(ch_list, i)
             data = self._get_data(ch_list, i, unit)
-            setattr(self, attr, data)
+            if hasattr(self, attr):
+                prev_data = getattr(self, attr)
+                setattr(self, attr, append(prev_data, data))
+            else:
+                setattr(self, attr, data)
+
+        # close the data file
+        self._close_dewefile()
+
+    def _close_dewefile(self):
+        if self._lib.DWCloseDataFile() != DWStatus.DWSTAT_OK.value:
+            raise RuntimeError('Could not close the Dewesoft file!')
+
+    def _fill_gaps(self):
+        pass
 
     def _get_channel_name(self, ch_list, i):
         return str(ch_list[i].name)[2:-1]
@@ -120,15 +145,22 @@ class Reader:
                                         p_time_stamp) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not obtain channel data')
         data_array = zeros((sample_cnt, 1))
-        if self.time is None:
+        if i != 0:
+            for j in range(0, sample_cnt):
+                data_array[j] = p_data[j]
+            data_array *= unit
+        else:
             time_array = zeros((sample_cnt, 1))
             for j in range(0, sample_cnt):
                 time_array[j] = p_time_stamp[j]
                 data_array[j] = p_data[j]
-            self.time = time_array * u['s']
-            data_array *= unit
-        else:
-            for j in range(0, sample_cnt):
-                data_array[j] = p_data[j]
+            if self.time is None:
+                self.time = time_array * u['s']
+            else:
+                self.time = append(self.time, time_array)
             data_array *= unit
         return data_array
+
+    def __del__(self):
+        if self._lib.DWDeInit() != DWStatus.DWSTAT_OK.value:
+            raise RuntimeError('Could not deconstruct the DWDataReaderLib!')
