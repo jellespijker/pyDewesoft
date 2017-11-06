@@ -120,7 +120,7 @@ class Reader:
             data = self._get_data(ch_list, i, unit)
             if hasattr(self.data, attr):
                 prev_data = getattr(self.data, attr)
-                setattr(self.data, attr, append(prev_data, self.data))
+                setattr(self.data, attr, append(prev_data, data))
             else:
                 setattr(self.data, attr, data)
 
