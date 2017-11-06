@@ -32,7 +32,7 @@ class Data:
 
     @property
     def channel_names(self):
-        return self.__dict__.keys()
+        return list(self.__dict__.keys())
 
 
 class Reader:
