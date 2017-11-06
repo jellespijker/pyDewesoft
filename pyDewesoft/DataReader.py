@@ -116,6 +116,7 @@ class Reader:
         # get the data
         for i in range(0, num):
             attr = self._get_channel_name(ch_list, i)
+            attr = self._generate_valid_attr_name(attr)
             unit = self._get_unit(ch_list, i)
             data = self._get_data(ch_list, i, unit)
             if hasattr(self.data, attr):
@@ -211,6 +212,9 @@ class Reader:
                 self.data.time = append(self.data.time, time_array)
             data_array *= unit
         return data_array
+
+    def _generate_valid_attr_name(self, attr):
+        return re.sub(r'[^a-zA-Z0-9_][^a-zA-Z0-9_]*', '_', attr)
 
     def __del__(self):
         if self._lib.DWDeInit() != DWStatus.DWSTAT_OK.value:
