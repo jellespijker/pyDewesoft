@@ -4,13 +4,15 @@ from os.path import dirname, abspath
 from os import listdir
 from dill import dump
 
+base_test_dir = dirname(__file__) + r'/../pyDewesoft/resources/testdata/'
 
 class TestReader(TestCase):
     def test_read(self):
         reader = Reader()
-        reader.read(dirname(__file__) + r'\..\resources\testdata\fieldtest_2017_09_21_092526.d7d')
-        print(reader.data.Agregaat_weight)
-        reader.save('data.dwp')
+        reader.read(base_test_dir + 'data_01.dxd')
+        expected_result = reader.load(base_test_dir + 'data_01.pyDW')
+        for channel in expected_result.channel_names:
+
         del reader
 
         # def test_sequence_read(self):

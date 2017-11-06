@@ -7,8 +7,8 @@ from pint.errors import UndefinedUnitError
 from numpy import zeros, append, where, diff
 from os.path import dirname
 import re
-from dill import dump, load
-import gzip
+from dill import dumps, loads, HIGHEST_PROTOCOL
+import zlib
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
 
@@ -39,9 +39,10 @@ class Reader:
     r"""
     The DWdataReader reads .d7d, .dxd, .d7z and .dxz files and exports them to a data structure as Reader.data. Each
     individual channel and/or variable in the Dewesoft file is extracted to an property in the Data object with the same
-    name. All time channels linked to the individual channels are discarded and a single time property is set, which is taken
-    from the first encountered channel. This could result in unexpected behavior if asynchronous capture was used in Dewesoft.
-    If a unit for a channel/variable is specified in Dewesoft, The reader tries to exports that unit to a Pint unit.
+    name. All time channels linked to the individual channels are discarded and a single time property is set, which is
+    taken from the first encountered channel. This could result in unexpected behavior if asynchronous capture was used
+    in Dewesoft. If a unit for a channel/variable is specified in Dewesoft, The reader tries to exports that unit to a
+    Pint unit.
 
     :param filename: The file name to import
     """
@@ -82,7 +83,8 @@ class Reader:
 
     def read(self, filename=None):
         r"""
-        Reads a Dewesoft file, the results are stored in the Reader.data object and can be saved using the Read.save() method.
+        Reads a Dewesoft file, the results are stored in the Reader.data object and can be saved using the Read.save()
+        method.
 
         :param filename: the file name
         """
@@ -220,22 +222,26 @@ class Reader:
         if self._lib.DWDeInit() != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not deconstruct the DWDataReaderLib!')
 
-    def save(self, filename):
+    def save(self, filename: str):
         r"""
         Saves the Reader.data object to a file, using a compression algorithm and dill serialization
 
-        :param filename: the filename
+        :param filename: the filename, if no extension is given .pyDW is used.
         """
-        with gzip.open(filename, 'wb') as handle:
-            dump(self.data, handle, protocol=4)
+        if '.' not in filename:
+            filename += '.pyDW'
+        with open(filename, 'wb') as handle:
+            handle.write(zlib.compress(dumps(self.data, protocol=HIGHEST_PROTOCOL), level=9))
 
     def load(self, filename):
         r"""
         Loads previous obtained data
 
-        :param filename: the filename
+        :param filename: the filename, if no extension is given .pyDW is used.
         :return: a Data object
         """
-        with gzip.open(filename, 'rb') as handle:
-            data = load(filename)
+        if '.' not in filename:
+            filename += '.pyDW'
+        with open(filename, 'rb') as handle:
+            data = loads(zlib.decompress(handle.read()))
         return data
