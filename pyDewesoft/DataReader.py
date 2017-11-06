@@ -4,11 +4,12 @@ import _ctypes
 import platform
 from pint import UnitRegistry
 from pint.errors import UndefinedUnitError
-from numpy import zeros, append, where, diff
+from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty
 from os.path import dirname
 import re
 from dill import dumps, loads, HIGHEST_PROTOCOL
 import zlib
+import logging
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
 
@@ -29,10 +30,14 @@ class Data:
         self.start_store_time = None
         self.duration = None
         self.time = None
+        self.offset_channel_idx = len(self.channel_names)
 
     @property
     def channel_names(self):
-        return list(self.__dict__.keys())
+        channels = list(self.__dict__.keys())
+        if 'offset_channel_idx' in channels:
+            channels.remove('offset_channel_idx')
+        return channels
 
 
 class Reader:
@@ -48,6 +53,7 @@ class Reader:
     """
 
     def __init__(self, filename=None):
+        logging.info('Reader.__init__ called')
         self.filename = filename
         self.platform = platform.architecture()
         self.data = Data()
@@ -135,13 +141,26 @@ class Reader:
             raise RuntimeError('Could not close the Dewesoft file!')
 
     def _fill_gaps(self):
-        diff_t = diff(self.time) - 1.5 / self.sample_rate
+        diff_t = diff(self.data.time) - 1.5 / self.data.sample_rate
         time_gaps = where(diff_t > 0)
-        for gap in time_gaps:
-            # fill the gap with NAN in all data
-            # fill the time with sample rate
-            # add time difference to next time_gaps
-            pass
+        for gap in time_gaps[0]:
+            start_time = self.data.time[gap]
+            end_time = self.data.time[gap + 1]
+            dt = 1 / self.data.sample_rate
+            fill_time = arange(start_time, end_time, dt)
+            self.data.time = insert(self.data.time, gap + 1, fill_time)
+            for chan_name in self.data.channel_names[self.data.offset_channel_idx:]:
+                chan = getattr(self.data, chan_name)
+                if isinstance(chan, ndarray):
+                    try:
+                        shape = (len(fill_time), chan.shape[1])
+                    except IndexError:
+                        shape = fill_time.shape
+
+                    nan_data = empty(shape)
+                    nan_data[:] = nan
+                    logging.info(chan_name)
+                    setattr(self.data, chan_name, insert(chan, gap + 1, nan_data))
 
     def _get_channel_name(self, ch_list, i):
         return str(ch_list[i].name)[2:-1]
