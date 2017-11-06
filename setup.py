@@ -10,5 +10,5 @@ setup(
     description='A Python module to read Dewesoft datafiles',
     keywords='Measurement, Engineering, DSP, Signal processing',
     packages=find_packages(),
-    install_requires=['pint', 'numpy', 'pip-tools']
+    install_requires=['pint', 'numpy', 'pip-tools', 'dill']
 )
