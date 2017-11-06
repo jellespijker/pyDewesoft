@@ -1,9 +1,8 @@
 from unittest import TestCase
 from pyDewesoft.DataReader import Reader
-from os.path import dirname, abspath
+from os.path import dirname
 import numpy as np
 from os import listdir
-from dill import dump
 
 base_test_dir = dirname(__file__) + r'/../pyDewesoft/resources/testdata/'
 
@@ -17,8 +16,12 @@ class TestReader(TestCase):
             np.testing.assert_array_equal(getattr(reader.data, channel), getattr(expected_result, channel))
         del reader
 
-        # def test_sequence_read(self):
-        #     f_names = [dirname(__file__) + '\\..\\resources\\testdata\\' + x for x in listdir(dirname(__file__) + '\\..\\resources\\testdata\\') if x.endswith('.d7d')]
-        #     reader = Reader()
-        #     reader.sequence_read(filenames=f_names, fill_gaps=False)
-        #     del reader
+    def test_sequence_read_nocorrection(self):
+        f_names = [base_test_dir + x for x in listdir(base_test_dir) if x.endswith('.dxd')]
+        reader = Reader()
+        reader.sequence_read(filenames=f_names, correcttime=False)
+        expected_result = reader.load(base_test_dir + 'data_01_02_nocorrection.pyDW')
+        self.assertEqual(reader.data.channel_names, expected_result.channel_names)
+        for channel in expected_result.channel_names:
+            np.testing.assert_array_equal(getattr(reader.data, channel), getattr(expected_result, channel))
+        del reader
