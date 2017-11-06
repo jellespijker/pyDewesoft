@@ -1,6 +1,7 @@
 from unittest import TestCase
 from pyDewesoft.DataReader import Reader
 from os.path import dirname, abspath
+import numpy as np
 from os import listdir
 from dill import dump
 
@@ -11,8 +12,9 @@ class TestReader(TestCase):
         reader = Reader()
         reader.read(base_test_dir + 'data_01.dxd')
         expected_result = reader.load(base_test_dir + 'data_01.pyDW')
+        self.assertEqual(reader.data.channel_names, expected_result.channel_names)
         for channel in expected_result.channel_names:
-
+            np.testing.assert_array_equal(getattr(reader.data, channel), getattr(expected_result, channel))
         del reader
 
         # def test_sequence_read(self):
