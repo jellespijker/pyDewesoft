@@ -1,1 +1,1 @@
-include pyDewesoft/resources/Lib/*
+include pyDewesoft/resources/DWDataReaderLib*.dll

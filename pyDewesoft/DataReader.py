@@ -54,9 +54,9 @@ class Reader:
         if 'Win' not in self.platform[1]:
             raise NotImplementedError('Only the Windows operating system is supported at this stage!')
         if '64bit' in self.platform[0]:
-            self._lib = cdll.LoadLibrary(dirname(__file__) + r'\resources\Lib\DWDataReaderLib64.dll')
+            self._lib = cdll.LoadLibrary(dirname(__file__) + r'\resources\DWDataReaderLib64.dll')
         else:
-            self._lib = cdll.LoadLibrary(dirname(__file__) + r'\resources\Lib\DWDataReaderLib.dll')
+            self._lib = cdll.LoadLibrary(dirname(__file__) + r'\resources\DWDataReaderLib.dll')
 
         if self._lib.DWInit() != DWStatus.DWSTAT_OK.value:
             if '64bit' in self.platform[0]:
