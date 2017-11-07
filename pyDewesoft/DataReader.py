@@ -90,12 +90,13 @@ class Time:
 
 class Data:
     r"""
-    Data structure containing the exported channels. Each Data class contains atleast:
+    Data structure containing the exported channels. Each Data class contains at least:
 
     * sample_rate
     * start_store_time
     * duration
-    * time (all individual channel times are discarded and the first channel time is used through out)
+    * time for each channel
+    * Individually exported channels attributes with documentation and units if these are specified in Dewesoft
 
     """
 
@@ -119,7 +120,7 @@ class Data:
 
     def __getitem__(self, item):
         if item in self.time:
-            return (self.time[item], getattr(self, item))
+            return self.time[item], getattr(self, item)
         else:
             return None, array(getattr(self, item))
 
@@ -193,6 +194,32 @@ class Reader:
 
         :param filename: the file name
         """
+        finfo = self._open_file(filename)
+        self._get_file_info(finfo)
+        num = self._get_nof_channels()
+        ch_list = self._get_channel_list(num)
+        # get the data
+        for i in range(0, num):
+            attr = self._get_channel_name(ch_list, i)
+            unit = self._get_unit(ch_list, i)
+            time, data = self._get_data(ch_list, i, unit)
+            desc = self._get_channel_desc(ch_list, i, attr, data)
+            if hasattr(self.data, attr):
+                prev_data = getattr(self.data, attr)
+                setattr(self.data, attr, append(prev_data, data))
+                prev_time = self.data.time[attr]
+                self.data.time[attr] = append(prev_time, time)
+                logging.info('Imported and appended {}'.format(attr))
+            else:
+                setattr(self.data, attr, data)
+                setattr(getattr(self.data, attr), '__doc__', desc)
+                self.data.time[attr] = time
+                logging.info('Imported {}'.format(attr))
+
+        # close the data file
+        self._close_dewefile()
+
+    def _open_file(self, filename):
         if filename is None:
             if self.filename is None:
                 raise ValueError('Dewesoft filename not specified!')
@@ -202,6 +229,9 @@ class Reader:
         finfo = DWFileInfo(0, 0, 0)
         if self._lib.DWOpenDataFile(fname, addressof(finfo)) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not open file: ' + filename)
+        return finfo
+
+    def _get_file_info(self, finfo):
         if self.data.sample_rate is None:
             self.data.sample_rate = finfo.sample_rate
         if self.data.start_store_time is None:
@@ -211,35 +241,19 @@ class Reader:
         else:
             self.data.duration += finfo.duration
 
-        # get number of channels
+    def _get_nof_channels(self):
         num = self._lib.DWGetChannelListCount()
         if num == -1:
             raise RuntimeError('Could not obtain number of channels!')
 
-        # get channel list
+        return num
+
+    def _get_channel_list(self, num):
         ch_list = (DWChannel * num)()
         if self._lib.DWGetChannelList(byref(ch_list)) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not obtain the channels!')
 
-        # get the data
-        for i in range(0, num):
-            attr = self._get_channel_name(ch_list, i)
-            attr = self._generate_valid_attr_name(attr)
-            unit = self._get_unit(ch_list, i)
-            time, data = self._get_data(ch_list, i, unit)
-            if hasattr(self.data, attr):
-                prev_data = getattr(self.data, attr)
-                setattr(self.data, attr, append(prev_data, data))
-                prev_time = self.data.time[attr]
-                self.data.time[attr] = append(prev_time, time)
-                logging.info('Imported and appended {}'.format(attr))
-            else:
-                setattr(self.data, attr, data)
-                self.data.time[attr] = time
-                logging.info('Imported {}'.format(attr))
-
-        # close the data file
-        self._close_dewefile()
+        return ch_list
 
     def _close_dewefile(self):
         if self._lib.DWCloseDataFile() != DWStatus.DWSTAT_OK.value:
@@ -268,7 +282,17 @@ class Reader:
             self.data.time = insert(self.data.time, gap + 1, fill_time)
 
     def _get_channel_name(self, ch_list, i):
-        return str(ch_list[i].name)[2:-1]
+        attr = str(ch_list[i].name)[2:-1]
+        valid_attr = re.sub(r'[^a-zA-Z0-9_][^a-zA-Z0-9_]*', '_', attr)
+        return 'ch_' + valid_attr
+
+    def _get_channel_desc(self, ch_list, i, attr, data):
+        dw_desc = 'states: \"{}\"'.format(str(ch_list[i].description)[2:-1])
+        if len(dw_desc[10:]) == 0:
+            dw_desc = 'is empty'
+        desc = ('{} is an imported Dewesoft channel consisting of an {} with a {} unit. The channel description {}'
+                ).format(attr[3:], type(data.magnitude), str(data.units), dw_desc)
+        return desc
 
     def _get_unit(self, ch_list, i):
         unitstr = str(ch_list[i].unit)[2:-1]
@@ -329,10 +353,6 @@ class Reader:
             data_array[j] = p_data[j]
         data_array *= unit
         return time_array, data_array
-
-    def _generate_valid_attr_name(self, attr):
-        valid_attr = re.sub(r'[^a-zA-Z0-9_][^a-zA-Z0-9_]*', '_', attr)
-        return 'ch_' + valid_attr
 
     def __del__(self):
         if self._lib.DWDeInit() != DWStatus.DWSTAT_OK.value:
