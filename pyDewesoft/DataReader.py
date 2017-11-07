@@ -106,6 +106,29 @@ class Data:
         self.time = Time()
         self.offset_channel_idx = len(self.channel_names)
 
+    def __contains__(self, item):
+        return item in self.channel_names
+
+    def __iter__(self):
+        for chan in self.channel_names:
+            yield (chan, self[chan])
+        return
+
+    def __len__(self):
+        return len(self.channel_names)
+
+    def __getitem__(self, item):
+        if item in self.time:
+            return (self.time[item], getattr(self, item))
+        else:
+            return None, array(getattr(self, item))
+
+    def __setitem__(self, key, value):
+        raise NotImplementedError
+
+    def __delitem__(self, key):
+        raise NotImplementedError
+
     @property
     def channel_names(self):
         channels = list(self.__dict__.keys())
