@@ -1,1 +1,1 @@
-from .DataReader import Reader, u, Data
+from .DataReader import Reader, u, Data, Time

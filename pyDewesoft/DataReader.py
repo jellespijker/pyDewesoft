@@ -4,7 +4,7 @@ import _ctypes
 import platform
 from pint import UnitRegistry
 from pint.errors import UndefinedUnitError
-from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty
+from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty, array, linspace, ones
 from os.path import dirname
 import re
 from dill import dumps, loads, HIGHEST_PROTOCOL
@@ -12,6 +12,80 @@ import zlib
 import logging
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
+
+
+class Time:
+    r"""
+    Class that stores the individual channel times. It stores only unique channel time arrays, mapping the channels.
+    """
+
+    def __init__(self):
+        self._time_map = {}
+        self._time = {}
+
+    def __contains__(self, item):
+        return item in self._time_map.keys()
+
+    def __iter__(self):
+        for tm_key, tm_value in self._time_map.items():
+            yield (tm_key, self._time[tm_value] * u.s)
+        return
+
+    def __len__(self):
+        return len(self._time_map)
+
+    def __getitem__(self, item):
+        return self._time[self._time_map[item]] * u.s
+
+    def __setitem__(self, key, value):
+        if key not in self._time_map.keys():
+            self.append(key, value)
+        else:
+            idx, contains = self._contains_time(value)
+            if contains:
+                self._time_map[key] = idx
+            else:
+                self._time_map[key] = len(self._time)
+                self._time[self._time_map[key]] = value
+
+    def __delitem__(self, key):
+        time_key = self._time_map[key]
+        cnt = list(self._time.values()).count(time_key)
+        del self._time_map[key]
+        if cnt == 1:
+            del self._time[time_key]
+
+    def append(self, channel_name, time):
+        idx, contains = self._contains_time(time)
+        if contains:
+            self._time_map[channel_name] = idx
+        else:
+            self._time_map[channel_name] = len(self._time)
+            self._time[self._time_map[channel_name]] = time
+
+    def _contains_time(self, item):
+        contains = True
+        for k, t in self._time.items():
+            if len(t) == len(item):
+                if len(t) > 10:
+                    check_idx = linspace(start=0, stop=int(len(t) / 2), num=5, dtype=int)
+                    check_idx = append(check_idx, -check_idx)
+                elif len(t) > 0:
+                    if (t == item)[0, 0]:
+                        return k, True
+                    else:
+                        contains = False
+                        continue
+                else:
+                    return k, True
+
+                for idx in check_idx:
+                    if t[idx] != item[idx]:
+                        contains = False
+                        break
+                if contains:
+                    return k, True
+        return '', False
 
 
 class Data:
@@ -29,7 +103,7 @@ class Data:
         self.sample_rate = None
         self.start_store_time = None
         self.duration = None
-        self.time = None
+        self.time = Time()
         self.offset_channel_idx = len(self.channel_names)
 
     @property
@@ -37,6 +111,7 @@ class Data:
         channels = list(self.__dict__.keys())
         if 'offset_channel_idx' in channels:
             channels.remove('offset_channel_idx')
+            channels.remove('time')
         return channels
 
 
@@ -53,9 +128,10 @@ class Reader:
     """
 
     def __init__(self, filename=None):
-        logging.info('Reader.__init__ called')
+        logging.info('Reader initialized')
         self.filename = filename
         self.platform = platform.architecture()
+        logging.info('{} platform used'.format(self.platform))
         self.data = Data()
 
         if 'Win' not in self.platform[1]:
@@ -98,6 +174,7 @@ class Reader:
             if self.filename is None:
                 raise ValueError('Dewesoft filename not specified!')
             filename = self.filename
+        logging.info('Reading file: {}'.format(filename))
         fname = c_char_p(filename.encode())
         finfo = DWFileInfo(0, 0, 0)
         if self._lib.DWOpenDataFile(fname, addressof(finfo)) != DWStatus.DWSTAT_OK.value:
@@ -126,12 +203,17 @@ class Reader:
             attr = self._get_channel_name(ch_list, i)
             attr = self._generate_valid_attr_name(attr)
             unit = self._get_unit(ch_list, i)
-            data = self._get_data(ch_list, i, unit)
+            time, data = self._get_data(ch_list, i, unit)
             if hasattr(self.data, attr):
                 prev_data = getattr(self.data, attr)
                 setattr(self.data, attr, append(prev_data, data))
+                prev_time = self.data.time[attr]
+                self.data.time[attr] = append(prev_time, time)
+                logging.info('Imported and appended {}'.format(attr))
             else:
                 setattr(self.data, attr, data)
+                self.data.time[attr] = time
+                logging.info('Imported {}'.format(attr))
 
         # close the data file
         self._close_dewefile()
@@ -139,6 +221,7 @@ class Reader:
     def _close_dewefile(self):
         if self._lib.DWCloseDataFile() != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not close the Dewesoft file!')
+        logging.info('Closing Dewefile')
 
     def _fill_gaps(self):
         diff_t = diff(self.data.time) - 1.5 / self.data.sample_rate
@@ -148,10 +231,9 @@ class Reader:
             end_time = self.data.time[gap + 1]
             dt = 1 / self.data.sample_rate
             fill_time = arange(start_time, end_time, dt)
-            self.data.time = insert(self.data.time, gap + 1, fill_time)
             for chan_name in self.data.channel_names[self.data.offset_channel_idx:]:
                 chan = getattr(self.data, chan_name)
-                if isinstance(chan, ndarray):
+                if isinstance(chan, ndarray) and len(chan) == len(self.data.time):
                     try:
                         shape = (len(fill_time), chan.shape[1])
                     except IndexError:
@@ -159,8 +241,8 @@ class Reader:
 
                     nan_data = empty(shape)
                     nan_data[:] = nan
-                    logging.info(chan_name)
                     setattr(self.data, chan_name, insert(chan, gap + 1, nan_data))
+            self.data.time = insert(self.data.time, gap + 1, fill_time)
 
     def _get_channel_name(self, ch_list, i):
         return str(ch_list[i].name)[2:-1]
@@ -218,24 +300,16 @@ class Reader:
                                         p_time_stamp) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not obtain channel data')
         data_array = zeros((sample_cnt, 1))
-        if i != 0:
-            for j in range(0, sample_cnt):
-                data_array[j] = p_data[j]
-            data_array *= unit
-        else:
-            time_array = zeros((sample_cnt, 1))
-            for j in range(0, sample_cnt):
-                time_array[j] = p_time_stamp[j]
-                data_array[j] = p_data[j]
-            if self.data.time is None:
-                self.data.time = time_array * u['s']
-            else:
-                self.data.time = append(self.data.time, time_array)
-            data_array *= unit
-        return data_array
+        time_array = zeros((sample_cnt, 1))
+        for j in range(0, sample_cnt):
+            time_array[j] = p_time_stamp[j]
+            data_array[j] = p_data[j]
+        data_array *= unit
+        return time_array, data_array
 
     def _generate_valid_attr_name(self, attr):
-        return re.sub(r'[^a-zA-Z0-9_][^a-zA-Z0-9_]*', '_', attr)
+        valid_attr = re.sub(r'[^a-zA-Z0-9_][^a-zA-Z0-9_]*', '_', attr)
+        return 'ch_' + valid_attr
 
     def __del__(self):
         if self._lib.DWDeInit() != DWStatus.DWSTAT_OK.value:
