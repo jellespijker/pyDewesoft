@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='pyDewesoft',
-    version='0.2a',
+    version='1.0rc0',
     url='http://mti-gitlab.ihc.eu/generic-software/pyDewesoft',
     license='MIT License',
     author='Jelle Spijker',
