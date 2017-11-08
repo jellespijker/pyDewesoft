@@ -2,16 +2,18 @@ from .DWDataReaderHeader import *
 from ctypes import *
 import _ctypes
 import platform
-from pint import UnitRegistry
+from pint import UnitRegistry, set_application_registry
 from pint.errors import UndefinedUnitError
-from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty, array, linspace, ones
+from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty, array, linspace, histogram, max
 from os.path import dirname
 import re
 from dill import dumps, loads, HIGHEST_PROTOCOL
 import zlib
 import logging
+import warnings
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
+set_application_registry(u)
 
 
 class Time:
@@ -22,6 +24,9 @@ class Time:
     def __init__(self):
         self._time_map = {}
         self._time = {}
+        self._main_time = None
+        self.sample_rate = None
+        self._idx = 0
 
     def __contains__(self, item):
         return item in self._time_map.keys()
@@ -35,18 +40,24 @@ class Time:
         return len(self._time_map)
 
     def __getitem__(self, item):
-        return self._time[self._time_map[item]] * u.s
+        if item == 'main':
+            if self.main_time is None:
+                self._get_main_time_idx()
+            return self._time[self.main_time] * u.s
+        else:
+            return self._time[self._time_map[item]] * u.s
 
     def __setitem__(self, key, value):
-        if key not in self._time_map.keys():
-            self.append(key, value)
+        if key == 'main':
+            if self.main_time is None:
+                self._get_main_time_idx()
+            self._time[self.main_time] = value
+            return
+        idx, contains = self._contains_time(value)
+        if contains:
+            self._time_map[key] = idx
         else:
-            idx, contains = self._contains_time(value)
-            if contains:
-                self._time_map[key] = idx
-            else:
-                self._time_map[key] = len(self._time)
-                self._time[self._time_map[key]] = value
+            self._append_new_time(key, value)
 
     def __delitem__(self, key):
         time_key = self._time_map[key]
@@ -56,12 +67,73 @@ class Time:
             del self._time[time_key]
 
     def append(self, channel_name, time):
+        r"""
+        Add new time data for a channel, if the time vector exists, it maps the channel to the time line
+
+        :param channel_name: The channel name
+        :param time: The time vector to append
+        """
+        if channel_name == 'main':
+            if self.main_time is None:
+                self._get_main_time_idx()
+            self._time[self.main_time] = time
+            return
         idx, contains = self._contains_time(time)
         if contains:
             self._time_map[channel_name] = idx
         else:
-            self._time_map[channel_name] = len(self._time)
-            self._time[self._time_map[channel_name]] = time
+            self._append_new_time(channel_name, time)
+
+    def clean(self):
+        r"""
+        Cleans unused timelines
+        """
+        removed_cnt = []
+        self.main_time = None
+        for k in self._time.keys():
+            if k not in self._time_map.values():
+                removed_cnt.append(k)
+        for k in removed_cnt:
+            del self._time[k]
+
+    @property
+    def main_time(self):
+        r"""
+        The index of the main time line. end user stay away
+        """
+        return self._main_time
+
+    @main_time.setter
+    def main_time(self, value):
+        self._main_time = value
+
+    @property
+    def dt(self):
+        r"""
+        The DT time step or the inverse of the sample rate
+        """
+        return 1 / self.sample_rate * u.s
+
+    def _append_new_time(self, key, value):
+        self._time_map[key] = self._idx
+        self._time[self._time_map[key]] = value
+        self.main_time = None
+        self._idx += 1
+
+    def _get_main_time_idx(self):
+        if self.sample_rate is None:
+            error_msg = 'Sample rate not set!'
+            warnings.warn(error_msg)
+            raise ValueError(error_msg)
+        for k, t in self._time.items():
+            if len(t) < 2:
+                continue
+            diff_t = diff(t)
+            hist = histogram(diff_t)
+            dt = round(hist[1][where(hist[0] == max(hist[0]))][0], 4) * u.s
+            if dt == self.dt:
+                self._main_time = k
+                break
 
     def _contains_time(self, item):
         contains = True
@@ -70,8 +142,9 @@ class Time:
                 if len(t) > 10:
                     check_idx = linspace(start=0, stop=int(len(t) / 2), num=5, dtype=int)
                     check_idx = append(check_idx, -check_idx)
+                    check_idx[6] = -1
                 elif len(t) > 0:
-                    if (t == item)[0, 0]:
+                    if (t == item)[0]:
                         return k, True
                     else:
                         contains = False
@@ -101,11 +174,12 @@ class Data:
     """
 
     def __init__(self):
+        self.time = Time()
         self.sample_rate = None
         self.start_store_time = None
         self.duration = None
-        self.time = Time()
         self.offset_channel_idx = len(self.channel_names)
+        self.version = '1.0'
 
     def __contains__(self, item):
         return item in self.channel_names
@@ -131,7 +205,23 @@ class Data:
         raise NotImplementedError
 
     @property
+    def sample_rate(self):
+        r"""
+        The Dewesoft specified sample rate
+        :return:
+        """
+        return self.time.sample_rate
+
+    @sample_rate.setter
+    def sample_rate(self, value):
+        self.time.sample_rate = value
+
+    @property
     def channel_names(self):
+        r"""
+        A list of imported channels
+        :return:
+        """
         channels = list(self.__dict__.keys())
         if 'offset_channel_idx' in channels:
             channels.remove('offset_channel_idx')
@@ -208,7 +298,7 @@ class Reader:
                 prev_data = getattr(self.data, attr)
                 setattr(self.data, attr, append(prev_data, data))
                 prev_time = self.data.time[attr]
-                self.data.time[attr] = append(prev_time, time)
+                self.data.time.append(attr, append(prev_time, time))
                 logging.info('Imported and appended {}'.format(attr))
             else:
                 setattr(self.data, attr, data)
@@ -216,6 +306,7 @@ class Reader:
                 self.data.time[attr] = time
                 logging.info('Imported {}'.format(attr))
 
+        self.data.time.clean()
         # close the data file
         self._close_dewefile()
 
@@ -261,16 +352,15 @@ class Reader:
         logging.info('Closing Dewefile')
 
     def _fill_gaps(self):
-        diff_t = diff(self.data.time) - 1.5 / self.data.sample_rate
+        diff_t = diff(self.data.time['main']) - 1.5 / self.data.sample_rate
         time_gaps = where(diff_t > 0)
         for gap in time_gaps[0]:
-            start_time = self.data.time[gap]
-            end_time = self.data.time[gap + 1]
-            dt = 1 / self.data.sample_rate
-            fill_time = arange(start_time, end_time, dt)
+            start_time = self.data.time['main'][gap]
+            end_time = self.data.time['main'][gap + 1]
+            fill_time = arange(start_time.m, end_time.m, self.data.time.dt.m) * u.s
             for chan_name in self.data.channel_names[self.data.offset_channel_idx:]:
                 chan = getattr(self.data, chan_name)
-                if isinstance(chan, ndarray) and len(chan) == len(self.data.time):
+                if isinstance(chan, ndarray) and len(chan) == len(self.data.time['main']):
                     try:
                         shape = (len(fill_time), chan.shape[1])
                     except IndexError:
@@ -279,7 +369,7 @@ class Reader:
                     nan_data = empty(shape)
                     nan_data[:] = nan
                     setattr(self.data, chan_name, insert(chan, gap + 1, nan_data))
-            self.data.time = insert(self.data.time, gap + 1, fill_time)
+            self.data.time['main'] = insert(self.data.time['main'].m, gap + 1, fill_time.m)
 
     def _get_channel_name(self, ch_list, i):
         attr = str(ch_list[i].name)[2:-1]
@@ -346,8 +436,8 @@ class Reader:
         if self._lib.DWGetScaledSamples(dw_ch_index, c_int64(0), sample_cnt, p_data,
                                         p_time_stamp) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not obtain channel data')
-        data_array = zeros((sample_cnt, 1))
-        time_array = zeros((sample_cnt, 1))
+        data_array = zeros((sample_cnt,))
+        time_array = zeros((sample_cnt,))
         for j in range(0, sample_cnt):
             time_array[j] = p_time_stamp[j]
             data_array[j] = p_data[j]
