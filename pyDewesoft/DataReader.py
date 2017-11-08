@@ -4,7 +4,8 @@ import _ctypes
 import platform
 from pint import UnitRegistry, set_application_registry
 from pint.errors import UndefinedUnitError
-from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty, array, linspace, histogram, max
+from numpy import zeros, append, where, diff, ndarray, arange, insert, nan, empty, array, linspace, histogram, \
+    max as np_max
 from os.path import dirname
 import re
 from dill import dumps, loads, HIGHEST_PROTOCOL
@@ -14,6 +15,8 @@ import warnings
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
 set_application_registry(u)
+
+mod_log = logging.getLogger('pyDewesoft')
 
 
 class Time:
@@ -42,7 +45,10 @@ class Time:
     def __getitem__(self, item):
         if item == 'main':
             if self.main_time is None:
-                self._get_main_time_idx()
+                try:
+                    self._get_main_time_idx()
+                except RuntimeError:
+                    self.main_time = max(self._time, key=lambda k: len(set(self._time[k])))
             return self._time[self.main_time] * u.s
         else:
             return self._time[self._time_map[item]] * u.s
@@ -50,7 +56,10 @@ class Time:
     def __setitem__(self, key, value):
         if key == 'main':
             if self.main_time is None:
-                self._get_main_time_idx()
+                try:
+                    self._get_main_time_idx()
+                except RuntimeError:
+                    self.main_time = max(self._time, key=lambda k: len(set(self._time[k])))
             self._time[self.main_time] = value
             return
         idx, contains = self._contains_time(value)
@@ -75,7 +84,10 @@ class Time:
         """
         if channel_name == 'main':
             if self.main_time is None:
-                self._get_main_time_idx()
+                try:
+                    self._get_main_time_idx()
+                except RuntimeError:
+                    self.main_time = max(self._time, key=lambda k: len(set(self._time[k])))
             self._time[self.main_time] = time
             return
         idx, contains = self._contains_time(time)
@@ -123,17 +135,21 @@ class Time:
     def _get_main_time_idx(self):
         if self.sample_rate is None:
             error_msg = 'Sample rate not set!'
-            warnings.warn(error_msg)
+            mod_log.error(error_msg)
             raise ValueError(error_msg)
         for k, t in self._time.items():
             if len(t) < 2:
                 continue
             diff_t = diff(t)
             hist = histogram(diff_t)
-            dt = round(hist[1][where(hist[0] == max(hist[0]))][0], 4) * u.s
+            dt = round(hist[1][where(hist[0] == np_max(hist[0]))][0], 4) * u.s
             if dt == self.dt:
                 self._main_time = k
-                break
+                mod_log.info(r'Main time index is: {}'.format(k))
+                return
+        error_msg = r'No main time index found!'
+        mod_log.error(error_msg)
+        raise RuntimeError(error_msg)
 
     def _contains_time(self, item):
         contains = True
@@ -242,10 +258,10 @@ class Reader:
     """
 
     def __init__(self, filename=None):
-        logging.info('Reader initialized')
+        mod_log.info('Reader initialized')
         self.filename = filename
         self.platform = platform.architecture()
-        logging.info('{} platform used'.format(self.platform))
+        mod_log.info('{} platform used'.format(self.platform))
         self.data = Data()
         self.compression_rate = 5
 
@@ -300,12 +316,12 @@ class Reader:
                 setattr(self.data, attr, append(prev_data, data))
                 prev_time = self.data.time[attr]
                 self.data.time.append(attr, append(prev_time, time))
-                logging.info('Imported and appended {}'.format(attr))
+                mod_log.info('Imported and appended {}'.format(attr))
             else:
                 setattr(self.data, attr, data)
                 setattr(getattr(self.data, attr), '__doc__', desc)
                 self.data.time[attr] = time
-                logging.info('Imported {}'.format(attr))
+                mod_log.info('Imported {}'.format(attr))
 
         self.data.time.clean()
         # close the data file
@@ -316,7 +332,7 @@ class Reader:
             if self.filename is None:
                 raise ValueError('Dewesoft filename not specified!')
             filename = self.filename
-        logging.info('Reading file: {}'.format(filename))
+        mod_log.info('Reading file: {}'.format(filename))
         fname = c_char_p(filename.encode())
         finfo = DWFileInfo(0, 0, 0)
         if self._lib.DWOpenDataFile(fname, addressof(finfo)) != DWStatus.DWSTAT_OK.value:
@@ -350,15 +366,17 @@ class Reader:
     def _close_dewefile(self):
         if self._lib.DWCloseDataFile() != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not close the Dewesoft file!')
-        logging.info('Closing Dewefile')
+        mod_log.info('Closing Dewefile')
 
     def _fill_gaps(self):
         diff_t = diff(self.data.time['main']) - 1.5 / self.data.sample_rate
         time_gaps = where(diff_t > 0)
+        mod_log.debug(r'The following time_gaps found {}'.format(time_gaps))
         for gap in time_gaps[0]:
             start_time = self.data.time['main'][gap]
             end_time = self.data.time['main'][gap + 1]
             fill_time = arange(start_time.m, end_time.m, self.data.time.dt.m) * u.s
+            mod_log.debug(r'Filling time: {}'.format(fill_time))
             for chan_name in self.data.channel_names[self.data.offset_channel_idx:]:
                 chan = getattr(self.data, chan_name)
                 if isinstance(chan, ndarray) and len(chan) == len(self.data.time['main']):
@@ -457,8 +475,10 @@ class Reader:
         """
         if '.' not in filename:
             filename += '.pyDW'
+        mod_log.info('Saving file {}'.format(filename))
         with open(filename, 'wb') as handle:
             handle.write(zlib.compress(dumps(self.data, protocol=HIGHEST_PROTOCOL), level=self.compression_rate))
+        mod_log.info('Saved file {}'.format(filename))
 
     def load(self, filename):
         r"""
@@ -469,8 +489,10 @@ class Reader:
         """
         if '.' not in filename:
             filename += '.pyDW'
+        mod_log.info('Loading file {}'.format(filename))
         with open(filename, 'rb') as handle:
             data = loads(zlib.decompress(handle.read()))
+        mod_log.info('File {} loaded'.format(filename))
         return data
 
     @property
@@ -485,5 +507,6 @@ class Reader:
     def compression_rate(self, value):
         if isinstance(value, int) and value >= 1 and value <= 9:
             self._compression_rate = value
+            mod_log.info(r'Compression is set to : {}'.format(value))
         else:
             raise ValueError
