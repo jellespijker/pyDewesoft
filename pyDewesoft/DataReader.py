@@ -247,6 +247,7 @@ class Reader:
         self.platform = platform.architecture()
         logging.info('{} platform used'.format(self.platform))
         self.data = Data()
+        self.compression_rate = 5
 
         if 'Win' not in self.platform[1]:
             raise NotImplementedError('Only the Windows operating system is supported at this stage!')
@@ -457,7 +458,7 @@ class Reader:
         if '.' not in filename:
             filename += '.pyDW'
         with open(filename, 'wb') as handle:
-            handle.write(zlib.compress(dumps(self.data, protocol=HIGHEST_PROTOCOL), level=9))
+            handle.write(zlib.compress(dumps(self.data, protocol=HIGHEST_PROTOCOL), level=self.compression_rate))
 
     def load(self, filename):
         r"""
@@ -471,3 +472,18 @@ class Reader:
         with open(filename, 'rb') as handle:
             data = loads(zlib.decompress(handle.read()))
         return data
+
+    @property
+    def compression_rate(self):
+        r"""
+        Compression rate used when storing the data object to disk. A value between 1...9. Standard value is 5
+        :return:
+        """
+        return self._compression_rate
+
+    @compression_rate.setter
+    def compression_rate(self, value):
+        if isinstance(value, int) and value >= 1 and value <= 9:
+            self._compression_rate = value
+        else:
+            raise ValueError
