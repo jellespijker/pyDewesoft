@@ -1,1 +1,2 @@
 include pyDewesoft/resources/DWDataReaderLib*.dll
+include pyDewesoft/resources/EULA-DWDataReader.pdf
