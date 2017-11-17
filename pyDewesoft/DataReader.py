@@ -14,6 +14,8 @@ from .logger import logged
 
 u = UnitRegistry(autoconvert_offset_to_baseunit=True)
 set_application_registry(u)
+if hasattr(u, 'setup_matplotlib'):
+    u.setup_matplotlib()
 
 
 @logged
@@ -495,8 +497,9 @@ class Reader:
             filename += '.pyDW'
         self.logger.info('Loading file {}'.format(filename))
         with open(filename, 'rb') as handle:
-            data = loads(zlib.decompress(handle.read()))
+            data: Data = loads(zlib.decompress(handle.read()))
         self.logger.info('File {} loaded'.format(filename))
+        self.logger.info('The following channels are available: {}'.format(data.channel_names))
         return data
 
     @property
