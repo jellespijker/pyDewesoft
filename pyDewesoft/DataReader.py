@@ -17,6 +17,8 @@ set_application_registry(u)
 if hasattr(u, 'setup_matplotlib'):
     u.setup_matplotlib()
 
+__all__ = ['Data', 'Reader', 'dewe_reader']
+
 
 @logged
 class Time:
@@ -517,3 +519,8 @@ class Reader:
             self.logger.info(r'Compression is set to : {}'.format(value))
         else:
             raise ValueError
+
+
+def dewe_reader(filename):
+    reader = Reader(filename)
+    return reader.data
