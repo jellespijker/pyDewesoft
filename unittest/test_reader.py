@@ -2,11 +2,12 @@ from unittest import TestCase
 from pyDewesoft.DataReader import Reader
 from os.path import dirname
 import numpy as np
-from os import listdir, remove
+from os import listdir, remove, path
 import logging
 
 log_file = 'test.log'
-remove(log_file)
+if path.exists(log_file):
+    remove(log_file)
 logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 base_test_dir = dirname(__file__) + r'/../pyDewesoft/resources/testdata/'
