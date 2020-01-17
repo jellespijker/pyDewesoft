@@ -343,7 +343,7 @@ class Reader:
         self.logger.info('Reading file: {}'.format(filename))
         fname = c_char_p(filename.encode())
         finfo = DWFileInfo(0, 0, 0)
-        if self._lib.DWOpenDataFile(fname, addressof(finfo)) != DWStatus.DWSTAT_OK.value:
+        if self._lib.DWOpenDataFile(fname, finfo) != DWStatus.DWSTAT_OK.value:
             raise RuntimeError('Could not open file: ' + filename)
         return finfo
 
