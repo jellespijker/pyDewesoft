@@ -6,7 +6,7 @@
 #
 click==6.7                # via pip-tools
 first==2.0.1              # via pip-tools
-numpy==1.13.3
+numpy==1.22.0
 pint==0.8.1
 pip-tools==1.10.1
 six==1.11.0               # via pip-tools
